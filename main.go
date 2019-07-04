@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+/*
+It is possible that multiple requests are sent at the same time. If this happens,
+we want to be sure that read and write access to the request data is synchronized.
+This has been implemented using a mutex.
+*/
 var m sync.RWMutex
 
 // struct to store requests sent in the last 60 seconds
@@ -17,7 +22,7 @@ type DB struct {
 	Requests []time.Time `json:"db"`
 }
 
-//
+// helper to read the persisted requests from the json file
 func getPersistedRequests(filename string) DB {
 	plan, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -27,7 +32,6 @@ func getPersistedRequests(filename string) DB {
 	var db DB
 	err = json.Unmarshal(plan, &db)
 	if err != nil {
-		// log.error(err)
 		log.Print(err)
 	}
 
@@ -47,6 +51,7 @@ func countRequests(times []time.Time, now time.Time) int {
 	return len(times)
 }
 
+// loads requests from json file and returns number of requests sent within last 60s
 func getRequestCount() int {
 	defer m.RUnlock()
 	m.RLock()
@@ -56,13 +61,12 @@ func getRequestCount() int {
 	return countRequests(db.Requests, time.Now())
 }
 
+// saves the requests to json file
 func persistRequests() error {
 	defer m.Unlock()
 	m.Lock()
 
 	db := getPersistedRequests("./db.json")
-
-	// append new request to database
 	db.Requests = append(db.Requests, time.Now())
 
 	encodeDb, err := json.Marshal(db)
@@ -78,6 +82,7 @@ func persistRequests() error {
 	return nil
 }
 
+// middleware: when request is received, persist requests
 func incrementRequestCount(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := persistRequests(); err != nil {
@@ -87,6 +92,7 @@ func incrementRequestCount(next http.Handler) http.Handler {
 	})
 }
 
+// request returns 200 and request count from the last 60s
 func home(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 	fmt.Fprintf(w, "count: %d", getRequestCount())
